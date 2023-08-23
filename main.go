@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/corpix/uarand"
 	"github.com/golang/freetype"
@@ -235,17 +236,97 @@ func loadResponse(nickname string) (bool, int64) { // bool - success, int64 - re
 
 	followers := 0.0
 	bio := 0
+	activity := 100
+	old := 0
+	reposCount := 0.0
+	reposGists := 0.0
+	blog := 0
 
 	if a, ok := userInfo["followers"].(float64); ok { // Rating followers count
-		followers = math.Min(a/10.0, 100.0)
+		followers = math.Min(a/25.0, 100.0)
 	}
 	if a, ok := userInfo["bio"].(string); ok && len(a) > 5 { // Rating user bio
 		bio = 100
+	}
+	if a, ok := userInfo["updated_at"].(string); ok {
+		t, err := time.Parse(time.RFC3339, a)
+		if err == nil {
+			if (time.Hour * 24 * 7).Seconds() < time.Since(t).Seconds() {
+				activity = 0
+			}
+		}
+	}
+	if a, ok := userInfo["created_at"].(string); ok {
+		t, err := time.Parse(time.RFC3339, a)
+		if err == nil {
+			if (time.Hour * 24 * 365 * 4).Seconds() < time.Since(t).Seconds() {
+				old = 100
+			} else if (time.Hour * 24 * 365 * 3).Seconds() < time.Since(t).Seconds() {
+				old = 75
+			} else if (time.Hour * 24 * 365 * 2).Seconds() < time.Since(t).Seconds() {
+				old = 50
+			} else if (time.Hour * 24 * 365).Seconds() < time.Since(t).Seconds() {
+				old = 25
+			}
+		}
+	}
+	if a, ok := userInfo["public_repos"].(float64); ok {
+		reposCount = math.Min(a/2.0, 100.0)
+	}
+	if a, ok := userInfo["public_gists"].(float64); ok {
+		reposGists = math.Min(a/0.5, 100.0)
+	}
+	if a, ok := userInfo["blog"].(string); ok {
+		if a != "" {
+			blog = 100
+		}
 	}
 
 	descriptionPercent := float64(descriptionCount) / float64(len(repoInfo)) * 100.0
 	topicPercent := float64(topicCount) / float64(len(repoInfo)) * 100.0
 	watchersPercent := watchersCount / float64(len(repoInfo)) * 100.0
 
-	return false, (int64(descriptionPercent) + int64(watchersPercent) + int64(topicPercent) + int64(hasOutfitRepoPercent) + int64(followers) + int64(bio)) / 6 // Average result
+	result := averageWithWeights([]int64{
+		int64(descriptionPercent),
+		int64(watchersPercent),
+		int64(topicPercent),
+		int64(hasOutfitRepoPercent),
+		int64(followers),
+		int64(bio),
+		int64(activity),
+		int64(old),
+		int64(reposCount),
+		int64(reposGists),
+		int64(blog),
+	}, []float64{
+		0.5,
+		1,
+		0.3,
+		0.2,
+		3,
+		0.9,
+		0.05,
+		0.8,
+		0.6,
+		0.6,
+		0.2,
+	})
+
+	return false, result
+}
+
+func averageWithWeights(numbers []int64, weights []float64) int64 {
+	if len(numbers) != len(weights) {
+		log.Fatal("Not same count of numbers and weights!")
+	}
+
+	var sumWeight float64 = math.Abs(weights[0])
+	var sumNumbersWithWeights int64 = int64(float64(numbers[0]) * math.Abs(weights[0]))
+
+	for index, weight := range weights[1:] {
+		sumWeight += math.Abs(weight)
+		sumNumbersWithWeights += int64(math.Abs(weight) * float64(numbers[index+1]))
+	}
+
+	return int64(float64(sumNumbersWithWeights) / float64(sumWeight))
 }
